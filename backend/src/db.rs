@@ -1,38 +1,63 @@
 use actix_web::{post, web, HttpResponse};
-use bcrypt::hash;
+use bcrypt::{hash, verify};
 use mongodb::{bson::doc, Client, Collection};
+use serde_json::json;
 
 use crate::models::User;
 
 const DB_NAME: &str = "ecommdb";
 
-// @todo! Add a flag to differentiate between newly created user response and already existing user response;
 #[post("/add-user")]
 pub async fn add_user(client: web::Data<Client>, form: web::Form<User>) -> HttpResponse {
     let collection: Collection<User> = client.database(DB_NAME).collection("users");
-    let user: User;
 
     match collection.find_one(doc! {"email": &form.email}, None).await {
-        Ok(Some(ex_user)) => {
-            user = ex_user;
-        }
+        Ok(Some(user)) => HttpResponse::Ok().json(json!({"user": user, "success": false})),
         Ok(None) => {
             let hashed_pass: String = hash(&form.password, 12).unwrap();
-            user = User {
+            let user = User {
                 email: String::from(&form.email),
                 password: hashed_pass,
             };
 
             collection.insert_one(user.clone(), None).await.unwrap();
+            HttpResponse::Ok().json(json!({"user": user, "success": true}))
         }
         Err(error) => {
             println!("An Error Occurred!\n{}", error);
-            return HttpResponse::InternalServerError()
-                .body("An Error Occurred while creating user!");
+            HttpResponse::InternalServerError().body("An Error Occurred while creating user!")
         }
     }
+}
 
-    HttpResponse::Ok().json(user)
+#[post("/login")]
+pub async fn authenticate_user(client: web::Data<Client>, form: web::Form<User>) -> HttpResponse {
+    let db: Collection<User> = client.database(DB_NAME).collection("users");
+
+    match db.find_one(doc! { "email": &form.email }, None).await {
+        Ok(Some(user)) => {
+            match verify(&form.password, &user.password) {
+                Ok(status) => match status {
+                    true => HttpResponse::Ok()
+                        .json(json!({"email": &user.email.clone(), "success": true})),
+                    false => HttpResponse::Ok()
+                        .json(json!({"email": &user.email.clone(), "success": false})),
+                },
+                Err(error) => {
+                    println!("An Error Occurred!\n{}", error);
+                    HttpResponse::InternalServerError()
+                        .body("An Error Occurred while authenticating user!")
+                }
+            }
+        }
+        Ok(None) => {
+            HttpResponse::NotFound().json(json!({"message": "User not Found!", "success": false}))
+        }
+        Err(error) => {
+            println!("An Error Occurred!\n{}", error);
+            HttpResponse::InternalServerError().body("An Error Occurred while fetching user!")
+        }
+    }
 }
 
 pub async fn init_db(client: &Client) {

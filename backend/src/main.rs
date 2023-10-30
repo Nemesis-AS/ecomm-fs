@@ -4,7 +4,7 @@ mod models;
 use actix_web::{get, web, App, HttpResponse, HttpServer};
 use mongodb::Client;
 
-use db::{add_user, init_db};
+use db::{add_user, authenticate_user, init_db};
 
 #[get("/")]
 async fn index() -> actix_web::HttpResponse {
@@ -28,6 +28,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(client.clone()))
             .service(index)
             .service(add_user)
+            .service(authenticate_user)
     })
     .bind(("127.0.0.1", 8000))?
     .run()
